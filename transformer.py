@@ -2,10 +2,30 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
+import random
+from torch.nn import CrossEntropyLoss
 
-d_model = 512
+d_model = 16
 d_vocab = 10000
-max_tokens = 1000
+ctx_size = 10
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def gen_example():
+    length = random.randrange(2, ctx_size)
+    x = torch.zeros(length, d_model)
+    start = random.randrange(0, d_model-length)
+    for i in range(length):
+        x[i][start+i] = 1
+    return x[:-1], x[1:]
+
+def positional_encoding():
+    pos_enc = torch.Tensor(ctx_size, d_model)
+    for pos in range(ctx_size):
+        for i in range(d_model//2):
+            pos_enc[pos][2*i] = math.sin(pos/10000**(2*i/d_model))
+            pos_enc[pos][2*i+1] = math.cos(pos/10000**(2*i/d_model))
+    return pos_enc.to(device)
 
 class AttentionHead(nn.Module):
     def __init__(self, d_k, d_v):
@@ -59,20 +79,39 @@ class DecoderBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, num_layers=6, p_drop=0.1, d_ff=2048, h=8, d_k=64, d_v=64):
         super().__init__()
-        layers = []
-        for _ in range(num_layers):
-            layers.append(DecoderBlock(p_drop=p_drop, d_ff=d_ff, h=h, d_k=d_k, d_v=d_v))
-        layers.append(nn.Linear(d_model, d_vocab))
-        self.stack = nn.Sequential(*layers)
-        #self.pos_encoding = positional_encoding() # set requires_grad = False
+        embedding = torch.empty(d_vocab, d_model)
+        nn.init.kaiming_uniform_(embedding)
+        self.embedding = nn.Parameter(embedding)
+        layers = [DecoderBlock(p_drop=p_drop, d_ff=d_ff, h=h, d_k=d_k, d_v=d_v)
+                  for _ in range(num_layers)]
+        self.decoders = nn.Sequential(*layers)
+        self.pos_encoding = positional_encoding()
+        self.sqrt = math.sqrt(d_model)
 
-    def forward(self, x):
-        #x += self.pos_encoding[:len(x)]
-        logits = self.stack(x)
-        return logits
+    def forward(self, index):
+        x = torch.index_select(self.embedding, 0, index) * self.sqrt
+        x += self.pos_encoding[:len(x)]
+        x = self.decoders(x)
+        logits = x @ self.embedding.T
+        return F.softmax(logits, dim=1)
 
-x = torch.Tensor(3, d_model)
-model = Transformer()
+
+model = Transformer().to(device)
+loss_fn = CrossEntropyLoss()
+x = torch.randint(d_vocab, (ctx_size,)).to(device)
 x = model(x)
+print(x)
 print(x.shape)
+print(x.sum())
 
+
+"""
+for i in range(1000):
+    x, y = gen_example()
+    x = model(x)
+    print(x)
+    print(y)
+    loss = loss_fn(x, y)
+    print(loss.item())
+
+"""

@@ -34,6 +34,7 @@ class Net(nn.Module):
         return x
 
 def train_one_epoch(model, train_dl, loss_fn, optim):
+    model.train()
     for x, y in train_dl:
         logits = model(x)
         loss = loss_fn(logits, y)
@@ -43,6 +44,7 @@ def train_one_epoch(model, train_dl, loss_fn, optim):
 
 def evaluate(model, dl, loss_fn):
     total_loss, correct = 0, 0
+    model.eval()
     with torch.no_grad():
         for x, y in dl:
             logits = model(x)
@@ -61,7 +63,7 @@ def train(model, train_dl, test_dl, loss_fn, optim, num_epochs=5):
 
 loss_fn = torch.nn.CrossEntropyLoss()
 model = Net()
-model.load_state_dict(torch.load("model.pth"))
+#model.load_state_dict(torch.load("model.pth"))
 optim = torch.optim.Adam(model.parameters())
 
 
