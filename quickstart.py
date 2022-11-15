@@ -1,3 +1,5 @@
+# https://pytorch.org/tutorials/beginner/basics/quickstart_tutorial.html
+
 import torch
 from torch import nn
 import torch.nn.functional as F

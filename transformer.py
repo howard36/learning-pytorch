@@ -4,20 +4,28 @@ import torch.nn.functional as F
 import math
 import random
 from torch.nn import CrossEntropyLoss
+from torch.optim import Adam
 
-d_model = 16
-d_vocab = 10000
-ctx_size = 10
+d_model = 64
+d_vocab = 10
+ctx_size = 16
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def gen_example():
-    length = random.randrange(2, ctx_size)
-    x = torch.zeros(length, d_model)
-    start = random.randrange(0, d_model-length)
-    for i in range(length):
-        x[i][start+i] = 1
-    return x[:-1], x[1:]
+    length = random.randrange(1, 7)
+    x = torch.zeros(ctx_size, dtype=torch.int32)
+    x[0] = 1
+    for i in range(1, length+1):
+        x[i] = random.randrange(4, d_vocab)
+    x[length+1] = 3
+    for i in range(length+2, 2*length+2):
+        x[i] = x[2*length+2-i]
+    x[2*length+2] = 2
+    y = torch.zeros(ctx_size, dtype=torch.long)
+    for i in range(2*length+2):
+        y[i] = x[i+1]
+    return x, y
 
 def positional_encoding():
     pos_enc = torch.Tensor(ctx_size, d_model)
@@ -85,7 +93,7 @@ class Transformer(nn.Module):
         layers = [DecoderBlock(p_drop=p_drop, d_ff=d_ff, h=h, d_k=d_k, d_v=d_v)
                   for _ in range(num_layers)]
         self.decoders = nn.Sequential(*layers)
-        self.pos_encoding = positional_encoding()
+        self.pos_encoding = positional_encoding() # TODO: register as buffer
         self.sqrt = math.sqrt(d_model)
 
     def forward(self, index):
@@ -93,25 +101,38 @@ class Transformer(nn.Module):
         x += self.pos_encoding[:len(x)]
         x = self.decoders(x)
         logits = x @ self.embedding.T
-        return F.softmax(logits, dim=1)
+        return logits
 
 
-model = Transformer().to(device)
+model = Transformer(num_layers=4, d_ff=4*d_model, h=4, d_k=16, d_v=16).to(device)
 loss_fn = CrossEntropyLoss()
-x = torch.randint(d_vocab, (ctx_size,)).to(device)
-x = model(x)
-print(x)
-print(x.shape)
-print(x.sum())
+optim = Adam(model.parameters())
 
+def train(num_examples=10000000):
+    tot_loss, num_correct = 0, 0
+    model.train()
+    for i in range(num_examples):
+        x, y = gen_example()
+        x, y = x.to(device), y.to(device)
+        pred = model(x)
+        loss = loss_fn(pred, y)
 
-"""
-for i in range(1000):
-    x, y = gen_example()
-    x = model(x)
-    print(x)
-    print(y)
-    loss = loss_fn(x, y)
-    print(loss.item())
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
 
-"""
+        mid_idx = (x == 3).nonzero(as_tuple=True)[0].item()
+        tot_loss += loss.item()
+        num_correct += torch.equal(pred.argmax(dim=1)[mid_idx:], y[mid_idx:])
+
+        if i % 1000 == 999:
+            print(f"Loss: {tot_loss/1000:.2f}, Accuracy: {num_correct/1000:.2f}")
+            print(x)
+            print(pred.argmax(dim=1))
+            print(y)
+            print()
+            tot_loss = 0
+            num_correct = 0
+
+train()
+
